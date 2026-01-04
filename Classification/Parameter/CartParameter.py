@@ -1,0 +1,49 @@
+from Classification.Parameter.Parameter import Parameter
+
+
+class CartParameter(Parameter):
+
+    __prune: bool
+    __cross_validation_ratio: float
+
+    def __init__(self,
+                 seed: int,
+                 prune: bool,
+                 crossValidationRatio: float):
+        """
+        Parameters of the CART (Classification and Regression Trees) decision tree classifier.
+
+        PARAMETERS
+        ----------
+        seed : int
+            Seed is used for random number generation.
+        prune : bool
+            Boolean value for prune.
+        crossValidationRatio : float
+            Double value for cross validation ratio.
+        """
+        super().__init__(seed)
+        self.__prune = prune
+        self.__cross_validation_ratio = crossValidationRatio
+
+    def isPrune(self) -> bool:
+        """
+        Accessor for the prune.
+
+        RETURNS
+        -------
+        bool
+            Prune.
+        """
+        return self.__prune
+
+    def getCrossValidationRatio(self) -> float:
+        """
+        Accessor for the crossValidationRatio.
+
+        RETURNS
+        -------
+        float
+            crossValidationRatio.
+        """
+        return self.__cross_validation_ratio
