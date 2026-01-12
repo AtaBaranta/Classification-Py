@@ -125,10 +125,10 @@ class Cart(ValidatedModel):
                                   ratio=parameters.getCrossValidationRatio(),
                                   seed=parameters.getSeed(),
                                   stratified=True)
-            self.constructor1(CartNode(partition.get(1)))
+            self.constructor1(CartNode(partition.get(1), parameter=parameters))
             self.prune(partition.get(0))
         else:
-            self.constructor1(CartNode(trainSet))
+            self.constructor1(CartNode(trainSet, parameter=parameters))
 
     def loadModel(self, fileName: str):
         """

@@ -161,18 +161,21 @@ class CartNode(object):
                 else:
                     right_data.add(instance)
             
-            # Store weights and threshold in condition (using first attribute index as representative)
-            # The actual condition will need to be evaluated using all weights
+            # Store weights and threshold in condition for proper multivariate evaluation
             self.children.append(CartNode(data=left_data,
                                          condition=DecisionCondition(best_multivariate_weights[0][0],
                                                                      ContinuousAttribute(best_multivariate_threshold),
-                                                                     "<="),
+                                                                     "multivariate_left",
+                                                                     multivariateWeights=best_multivariate_weights,
+                                                                     multivariateThreshold=best_multivariate_threshold),
                                          parameter=parameter,
                                          isStump=isStump))
             self.children.append(CartNode(data=right_data,
                                          condition=DecisionCondition(best_multivariate_weights[0][0],
                                                                      ContinuousAttribute(best_multivariate_threshold),
-                                                                     ">"),
+                                                                     "multivariate_right",
+                                                                     multivariateWeights=best_multivariate_weights,
+                                                                     multivariateThreshold=best_multivariate_threshold),
                                          parameter=parameter,
                                          isStump=isStump))
         elif best_attribute != -1:
@@ -287,8 +290,8 @@ class CartNode(object):
         # Try multiple random linear combinations
         num_trials = min(20, len(continuous_indices) * 5)
         
-        # Use a fixed seed for reproducibility based on data size
-        # (simple hash to make it somewhat deterministic)
+        # Use a seed based on data size for reproducibility
+        np.random.seed(data.size() % 10000)
         
         for trial in range(num_trials):
             # Generate random weights (normalized to unit length)
@@ -413,13 +416,15 @@ class CartNode(object):
         
         self.children.append(CartNode(data=left_data,
                                      condition=DecisionCondition(attributeIndex=attributeIndex,
-                                                                 value=DiscreteAttribute(attributeValue)),
+                                                                 value=DiscreteAttribute(attributeValue),
+                                                                 comparison="="),
                                      parameter=parameter,
                                      isStump=isStump))
-        # Use special marker "!=" + value to indicate "not equal to value"
+        # Use != comparison operator for "not equal to value"
         self.children.append(CartNode(data=right_data,
                                      condition=DecisionCondition(attributeIndex=attributeIndex,
-                                                                 value=DiscreteAttribute("!=" + str(attributeValue))),
+                                                                 value=DiscreteAttribute(attributeValue),
+                                                                 comparison="!="),
                                      parameter=parameter,
                                      isStump=isStump))
 
