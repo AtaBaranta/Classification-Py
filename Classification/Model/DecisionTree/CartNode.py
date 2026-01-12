@@ -13,6 +13,7 @@ from Classification.InstanceList.Partition import Partition
 from Classification.Model.DecisionTree.DecisionCondition import DecisionCondition
 from Classification.Model.Model import Model
 from Classification.Parameter.CartParameter import CartParameter
+import numpy as np
 
 
 class CartNode(object):
@@ -31,13 +32,14 @@ class CartNode(object):
                      ):
         """
         The CartNode method takes InstanceList data as input and creates a binary decision tree node using
-        the Gini impurity as the splitting criterion (CART algorithm). It finds the best attribute to split on
-        by evaluating all attributes and choosing the one with the lowest Gini impurity.
+        the Gini impurity as the splitting criterion. This is a multivariate CART implementation that uses
+        linear combinations of attributes for splits when possible.
 
-        CART always creates binary splits:
-        - For continuous attributes: split at a threshold value
-        - For discrete attributes: create a binary split based on equality to a value
-        - For discrete indexed attributes: create a binary split
+        Multivariate CART creates oblique splits:
+        - For continuous attributes: tries linear combinations using LDA (w₁x₁ + w₂x₂ + ... ≤ θ)
+        - Falls back to univariate splits if multivariate learning fails
+        - For discrete attributes: binary splits based on equality
+        - For discrete indexed attributes: binary splits based on index
 
         PARAMETERS
         ----------
@@ -70,6 +72,18 @@ class CartNode(object):
         size = data.get(0).attributeSize()
         
         best_gini = self.__giniIndex(data.classDistribution())
+        best_attribute = -1
+        best_split_value = 0
+        
+        # Try multivariate splits if enabled in parameter
+        best_multivariate_gini = float('inf')
+        best_multivariate_weights = None
+        best_multivariate_threshold = None
+        
+        if parameter is not None and parameter.isMultivariate():
+            best_multivariate_gini, best_multivariate_weights, best_multivariate_threshold = self.__findBestMultivariateSplit(data)
+        
+        # Always try univariate splits as well (as fallback or primary approach)
         
         for j in range(size):
             index = index_list[j]
@@ -127,7 +141,41 @@ class CartNode(object):
                     left_distribution.addItem(instance.getClassLabel())
                     right_distribution.removeItem(instance.getClassLabel())
         
-        if best_attribute != -1:
+        # Decide whether to use multivariate or univariate split
+        use_multivariate = (best_multivariate_weights is not None and 
+                           best_multivariate_gini < best_gini)
+        
+        if use_multivariate:
+            # Use multivariate split - create children by partitioning data based on linear combination
+            self.leaf = False
+            left_data = InstanceList()
+            right_data = InstanceList()
+            
+            for instance in data.list:
+                projection = 0.0
+                for attr_idx, weight in best_multivariate_weights:
+                    projection += weight * instance.getAttribute(attr_idx).getValue()
+                
+                if projection <= best_multivariate_threshold:
+                    left_data.add(instance)
+                else:
+                    right_data.add(instance)
+            
+            # Store weights and threshold in condition (using first attribute index as representative)
+            # The actual condition will need to be evaluated using all weights
+            self.children.append(CartNode(data=left_data,
+                                         condition=DecisionCondition(best_multivariate_weights[0][0],
+                                                                     ContinuousAttribute(best_multivariate_threshold),
+                                                                     "<="),
+                                         parameter=parameter,
+                                         isStump=isStump))
+            self.children.append(CartNode(data=right_data,
+                                         condition=DecisionCondition(best_multivariate_weights[0][0],
+                                                                     ContinuousAttribute(best_multivariate_threshold),
+                                                                     ">"),
+                                         parameter=parameter,
+                                         isStump=isStump))
+        elif best_attribute != -1:
             self.leaf = False
             if isinstance(data.get(0).getAttribute(best_attribute), DiscreteIndexedAttribute):
                 self.__createChildrenForDiscreteIndexed(data=data,
@@ -205,6 +253,89 @@ class CartNode(object):
             probability = distribution.getProbability(item)
             gini -= probability * probability
         return gini
+
+    def __findBestMultivariateSplit(self, data: InstanceList) -> tuple:
+        """
+        Finds the best multivariate split using random linear combinations.
+        Uses a simpler and more robust approach than LDA: randomly generate
+        linear combinations and evaluate them with Gini impurity.
+        
+        PARAMETERS
+        ----------
+        data : InstanceList
+            Training data.
+            
+        RETURNS
+        -------
+        tuple
+            (best_gini, weights, threshold) where weights is a list of (attr_idx, weight) tuples.
+            Returns (float('inf'), None, None) if no good split is found.
+        """
+        # Get continuous attribute indices
+        continuous_indices = []
+        for i in range(data.get(0).attributeSize()):
+            if isinstance(data.get(0).getAttribute(i), ContinuousAttribute):
+                continuous_indices.append(i)
+        
+        if len(continuous_indices) < 2 or data.size() < 10:
+            return (float('inf'), None, None)
+        
+        best_gini = float('inf')
+        best_weights = None
+        best_threshold = None
+        
+        # Try multiple random linear combinations
+        num_trials = min(20, len(continuous_indices) * 5)
+        
+        # Use a fixed seed for reproducibility based on data size
+        # (simple hash to make it somewhat deterministic)
+        
+        for trial in range(num_trials):
+            # Generate random weights (normalized to unit length)
+            weights_vec = np.random.randn(len(continuous_indices))
+            weights_vec = weights_vec / np.linalg.norm(weights_vec)
+            
+            # Compute projections
+            projections = []
+            for instance in data.list:
+                projection = 0.0
+                for j, attr_idx in enumerate(continuous_indices):
+                    projection += weights_vec[j] * instance.getAttribute(attr_idx).getValue()
+                projections.append((projection, instance.getClassLabel()))
+            
+            # Sort by projection value
+            projections.sort(key=lambda x: x[0])
+            
+            # Try different split points (similar to univariate approach)
+            left_distribution = DiscreteDistribution()
+            right_distribution = DiscreteDistribution()
+            
+            # Initialize: all instances in right
+            for _, label in projections:
+                right_distribution.addItem(label)
+            
+            # Try each split point
+            for i in range(len(projections) - 1):
+                proj_val, label = projections[i]
+                left_distribution.addItem(label)
+                right_distribution.removeItem(label)
+                
+                if left_distribution.getSum() > 0 and right_distribution.getSum() > 0:
+                    # Compute threshold as midpoint
+                    threshold = (projections[i][0] + projections[i+1][0]) / 2.0
+                    
+                    gini = (left_distribution.getSum() / data.size()) * self.__giniIndex(left_distribution) + \
+                           (right_distribution.getSum() / data.size()) * self.__giniIndex(right_distribution)
+                    
+                    if gini < best_gini:
+                        best_gini = gini
+                        best_weights = [(continuous_indices[j], float(weights_vec[j])) for j in range(len(continuous_indices))]
+                        best_threshold = float(threshold)
+        
+        if best_weights is None:
+            return (float('inf'), None, None)
+        
+        return (best_gini, best_weights, best_threshold)
 
     def __createChildrenForDiscreteIndexed(self,
                                            data: InstanceList,

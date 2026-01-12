@@ -52,7 +52,7 @@ class DecisionCondition(object):
         RETURNS
         -------
         bool
-            True if gicen instance satisfies the conditions.
+            True if given instance satisfies the conditions.
         """
         if isinstance(self.__value, DiscreteIndexedAttribute):
             if self.__value.getIndex() != -1:
